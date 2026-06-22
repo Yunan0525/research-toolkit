@@ -79,7 +79,7 @@ research-toolkit/
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/YOUR_USERNAME/research-toolkit.git
+git clone https://github.com/Yunan0525/research-toolkit.git
 cd research-toolkit
 
 # 2. Create a virtual environment (keeps your system Python clean)
