@@ -1,0 +1,55 @@
+# =============================================================================
+# .gitignore  –  Research Data Analysis Toolkit
+# =============================================================================
+# Lists files and folders that Git should NEVER track.
+# This keeps your repository clean and prevents accidental exposure of
+# secrets, large binary files, or machine-specific settings.
+# =============================================================================
+
+# ── Python runtime artefacts ──────────────────────────────────────────────────
+__pycache__/
+*.py[cod]           # .pyc, .pyo, .pyd compiled bytecode
+*.pyd
+*.pyo
+
+# ── Virtual environments ──────────────────────────────────────────────────────
+# If you create a local environment with: python -m venv venv
+venv/
+.venv/
+env/
+.env/
+
+# ── Environment / secrets ─────────────────────────────────────────────────────
+# NEVER commit API keys, passwords, or tokens.
+.env
+secrets.toml
+.streamlit/secrets.toml   # Streamlit secrets (use the Cloud dashboard instead)
+
+# ── IDE and editor settings ───────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store             # macOS Finder metadata
+Thumbs.db             # Windows thumbnail cache
+
+# ── Test and coverage artefacts ───────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+
+# ── Distribution / build ──────────────────────────────────────────────────────
+dist/
+build/
+*.egg-info/
+
+# ── Jupyter notebooks (optional — remove this line if you use notebooks) ──────
+# .ipynb_checkpoints/
+
+# ── Large data files (add your own patterns as needed) ───────────────────────
+# *.csv files in data/ ARE tracked (sample files).
+# Add patterns here to exclude large personal datasets:
+# user_data/
+# *.fastq
+# *.bam

@@ -1,0 +1,27 @@
+# =============================================================================
+# .streamlit/config.toml
+# Streamlit application configuration and visual theme.
+#
+# This file controls the colour palette, layout, and upload limits.
+#
+# Nature journal-inspired palette:
+#   Accent teal   #2E8B8B  – primary buttons, active widgets
+#   Light grey    #F5F7FA  – page background
+#   Dark grey     #2C2C2C  – body text
+#   White         #FFFFFF  – sidebar / card backgrounds
+# =============================================================================
+
+[theme]
+backgroundColor          = "#F5F7FA"
+secondaryBackgroundColor = "#FFFFFF"
+textColor                = "#2C2C2C"
+primaryColor             = "#2E8B8B"
+font                     = "sans serif"
+
+[server]
+# Maximum size (in MB) for uploaded files
+maxUploadSize            = 200
+runOnSave                = false
+
+[browser]
+gatherUsageStats         = false

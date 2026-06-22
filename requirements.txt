@@ -1,0 +1,38 @@
+# =============================================================================
+# requirements.txt  –  Research Data Analysis Toolkit
+# =============================================================================
+# Streamlit Cloud reads this file automatically and installs every package
+# listed here before starting your application.
+#
+# HOW TO UPDATE LOCALLY
+#   After installing a new package with pip, run:
+#       pip freeze > requirements.txt
+#   Then commit and push the updated file to GitHub.
+#
+# VERSION PINNING STRATEGY
+#   Minor versions are pinned (e.g. streamlit>=1.35,<2.0) to allow patch
+#   updates (bug fixes) while blocking breaking major/minor changes.
+# =============================================================================
+
+# ── Web framework ─────────────────────────────────────────────────────────────
+streamlit>=1.35,<2.0
+
+# ── Data manipulation ─────────────────────────────────────────────────────────
+pandas>=2.0,<3.0
+numpy>=1.26,<2.0
+
+# ── Scientific computing & statistics ─────────────────────────────────────────
+scipy>=1.12,<2.0          # Curve fitting, statistical tests
+pingouin>=0.5,<1.0        # Extended stats: ANOVA, paired tests, effect sizes
+statsmodels>=0.14,<1.0    # Multiple-testing correction (BH, Bonferroni)
+
+# ── Visualisation ─────────────────────────────────────────────────────────────
+plotly>=5.20,<6.0         # Interactive charts
+kaleido>=0.2,<1.0         # Static PNG/SVG export from Plotly figures
+
+# ── File format support ───────────────────────────────────────────────────────
+openpyxl>=3.1,<4.0        # Read .xlsx files with pandas
+xlsxwriter>=3.1,<4.0      # Write formatted .xlsx exports
+
+# ── Testing (not installed on Streamlit Cloud, only needed locally) ───────────
+pytest>=8.0,<9.0
