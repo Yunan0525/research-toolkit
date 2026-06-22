@@ -146,7 +146,7 @@ with st.expander("Citing this toolkit"):
 
         Please cite:
         > *Research Data Analysis Toolkit* (v0.1.0).
-        > Available at: https://github.com/YOUR_USERNAME/research-toolkit
+        > Available at: https://github.com/Yunan0525/research-toolkit
         """
     )
 
@@ -155,5 +155,5 @@ st.divider()
 st.caption(
     "Research Data Analysis Toolkit · v0.1.0 · "
     "Built with [Streamlit](https://streamlit.io) · "
-    "[View source on GitHub](https://github.com/YOUR_USERNAME/research-toolkit)"
+    "[View source on GitHub](https://github.com/Yunan0525/research-toolkit)"
 )
