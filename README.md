@@ -17,7 +17,7 @@ Built with Python and Streamlit, deployable on Streamlit Cloud in minutes.
 
 ## Live Demo
 
-> 🚀 [Open the app on Streamlit Cloud](https://YOUR_APP_URL.streamlit.app)
+> 🚀 [Open the app on Streamlit Cloud](https://research-toolkit-yunanhu.streamlit.app/)
 > *(Replace this URL after deploying — see Deployment section below)*
 
 ---
