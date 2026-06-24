@@ -49,16 +49,75 @@ import numpy as np
 # Shared style constants
 # =============================================================================
 
-PALETTE = [
-    "#2E8B8B",   # Teal        — first group (control)
-    "#E07B6A",   # Coral       — second group
-    "#4C72B0",   # Steel blue  — third group
-    "#DD8452",   # Amber       — fourth group
-    "#55A868",   # Sage green  — fifth group
-    "#C44E52",   # Crimson     — sixth group
-    "#8172B3",   # Purple      — seventh group
-    "#937860",   # Taupe       — eighth group
-]
+# =============================================================================
+# Color palettes — selectable via the UI (palette= parameter on plot functions)
+# =============================================================================
+
+PALETTES = {
+    "Default": [
+        "#2E8B8B",   # Teal
+        "#E07B6A",   # Coral
+        "#4C72B0",   # Steel blue
+        "#DD8452",   # Amber
+        "#55A868",   # Sage green
+        "#C44E52",   # Crimson
+        "#8172B3",   # Purple
+        "#937860",   # Taupe
+    ],
+    "Nature-style": [
+        "#E64B35",   # Red         — Nature red
+        "#4DBBD5",   # Cyan        — Nature blue
+        "#00A087",   # Green       — Nature teal
+        "#3C5488",   # Navy        — Nature navy
+        "#F39B7F",   # Salmon
+        "#8491B4",   # Lavender blue
+        "#91D1C2",   # Mint
+        "#DC0000",   # Bright red
+    ],
+    "Colorblind-friendly": [
+        "#0072B2",   # Blue        — Wong palette
+        "#E69F00",   # Orange
+        "#009E73",   # Green
+        "#CC79A7",   # Pink/Purple
+        "#56B4E9",   # Sky blue
+        "#D55E00",   # Vermillion
+        "#F0E442",   # Yellow
+        "#000000",   # Black
+    ],
+    "Pastel": [
+        "#AEC6CF",   # Pastel blue
+        "#FFD1DC",   # Pastel pink
+        "#B5EAD7",   # Pastel mint
+        "#FFDAC1",   # Pastel peach
+        "#C7CEEA",   # Pastel lavender
+        "#E2F0CB",   # Pastel lime
+        "#F8C8D4",   # Pastel rose
+        "#BEE3F8",   # Pastel sky
+    ],
+    "High contrast": [
+        "#000000",   # Black
+        "#E6194B",   # Red
+        "#3CB44B",   # Green
+        "#4363D8",   # Blue
+        "#F58231",   # Orange
+        "#911EB4",   # Purple
+        "#42D4F4",   # Cyan
+        "#F032E6",   # Magenta
+    ],
+    "Viridis": [
+        "#440154",   # Deep purple
+        "#31688E",   # Blue
+        "#35B779",   # Green
+        "#FDE725",   # Yellow
+        "#21908C",   # Teal
+        "#5DC863",   # Light green
+        "#443983",   # Indigo
+        "#90D743",   # Lime
+    ],
+}
+
+# Keep PALETTE as the default for any internal fallback
+PALETTE = PALETTES["Default"]
 
 _FONT = "Arial, sans-serif"
 
@@ -155,6 +214,9 @@ def _bar_dot_plot(
     ref_label: str,
     title: str,
     stats_df: pd.DataFrame | None = None,
+    group_order: list | None = None,
+    palette: str = "Default",
+    show_annotations: bool = True,
 ) -> go.Figure:
     """
     Shared builder: grouped bar chart + individual dot overlay.
@@ -177,13 +239,33 @@ def _bar_dot_plot(
     ref_line    : y-value for the horizontal reference line (1.0 or 0.0)
     ref_label   : annotation text for the reference line
     title       : figure title (HTML allowed)
-    stats_df    : optional statistics table for significance annotations
+    stats_df         : optional statistics table for significance annotations
+    group_order      : list of group names in desired display order; if None,
+                       uses the order found in summary_df. Groups not present
+                       in summary_df are silently ignored.
+    palette          : name of color palette from PALETTES dict (default "Default")
+    show_annotations : if False, significance stars are not drawn even when
+                       stats_df is provided
     """
     _validate(summary_df, ["Gene", "Group", y_mean, y_sd])
     _validate(detail_df,  [gene_col, group_col, y_detail])
 
     genes  = summary_df["Gene"].unique().tolist()
-    groups = summary_df["Group"].unique().tolist()
+
+    # ── Resolve group order ───────────────────────────────────────────────────
+    # If caller supplies an explicit order, use it (filtering to groups that
+    # actually exist in the data).  Otherwise fall back to natural order.
+    available_groups = summary_df["Group"].unique().tolist()
+    if group_order is not None:
+        groups = [g for g in group_order if g in available_groups]
+        if not groups:                          # safety: nothing matched
+            groups = available_groups
+    else:
+        groups = available_groups
+
+    # ── Resolve color palette ─────────────────────────────────────────────────
+    active_palette = PALETTES.get(palette, PALETTES["Default"])
+
     n_genes  = len(genes)
     n_groups = len(groups)
 
@@ -196,7 +278,7 @@ def _bar_dot_plot(
 
     # ── Categorical x-axis bars ───────────────────────────────────────────────
     for i, group in enumerate(groups):
-        color   = PALETTE[i % len(PALETTE)]
+        color   = active_palette[i % len(active_palette)]
         grp_sum = summary_df[summary_df["Group"] == group]
 
         # Reorder to match `genes` list so bars align with dot overlay axis
@@ -239,7 +321,7 @@ def _bar_dot_plot(
     # xaxis2.range to [−0.5, n_genes − 0.5].
 
     for i, group in enumerate(groups):
-        color   = PALETTE[i % len(PALETTE)]
+        color   = active_palette[i % len(active_palette)]
         grp_det = detail_df[detail_df[group_col] == group]
 
         # Collect all (numeric_x, y_value) pairs for this group's dots
@@ -310,7 +392,8 @@ def _bar_dot_plot(
     )
 
     # ── Significance annotations ──────────────────────────────────────────────
-    if stats_df is not None and not stats_df.empty:
+    # Only drawn when the user has enabled them AND stats results are available.
+    if show_annotations and stats_df is not None and not stats_df.empty:
         _add_significance_annotations(fig, stats_df, summary_df, groups, y_mean, y_sd)
 
     # ── Layout with dual x-axes ───────────────────────────────────────────────
@@ -395,6 +478,9 @@ def plot_fold_change_bar(
     gene_col: str,
     stats_df: pd.DataFrame | None = None,
     title: str = "Fold Change (2<sup>−ΔΔCt</sup>)  —  mean ± SD, biological replicates",
+    group_order: list | None = None,
+    palette: str = "Default",
+    show_annotations: bool = True,
 ) -> go.Figure:
     """
     Bar + dot plot of Fold Change.
@@ -404,29 +490,35 @@ def plot_fold_change_bar(
 
     Parameters
     ----------
-    summary_df : output of summarise_results()
-                 Required columns: Gene, Group, Mean_FC, SD_FC
-    detail_df  : output of calculate_delta_delta_ct()
-                 Required columns: gene_col, group_col, Fold_Change
-    group_col  : group column name in detail_df
-    gene_col   : gene column name in detail_df
-    stats_df   : optional output of run_statistical_tests()
-                 If provided, significance stars added above bars (2 groups only)
-    title      : figure title (HTML ok)
+    summary_df       : output of summarise_results()
+                       Required columns: Gene, Group, Mean_FC, SD_FC
+    detail_df        : output of calculate_delta_delta_ct()
+                       Required columns: gene_col, group_col, Fold_Change
+    group_col        : group column name in detail_df
+    gene_col         : gene column name in detail_df
+    stats_df         : optional output of run_statistical_tests()
+                       If provided, significance stars added above bars (2 groups only)
+    title            : figure title (HTML ok)
+    group_order      : explicit group display order (list of group name strings)
+    palette          : color palette name — one of PALETTES keys
+    show_annotations : whether to draw significance stars
     """
     return _bar_dot_plot(
-        summary_df   = summary_df,
-        detail_df    = detail_df,
-        group_col    = group_col,
-        gene_col     = gene_col,
-        y_mean       = "Mean_FC",
-        y_sd         = "SD_FC",
-        y_detail     = "Fold_Change",
-        y_axis_title = "Fold Change (mean ± SD)",
-        ref_line     = 1.0,
-        ref_label    = "FC = 1",
-        title        = title,
-        stats_df     = stats_df,
+        summary_df       = summary_df,
+        detail_df        = detail_df,
+        group_col        = group_col,
+        gene_col         = gene_col,
+        y_mean           = "Mean_FC",
+        y_sd             = "SD_FC",
+        y_detail         = "Fold_Change",
+        y_axis_title     = "Fold Change (mean ± SD)",
+        ref_line         = 1.0,
+        ref_label        = "FC = 1",
+        title            = title,
+        stats_df         = stats_df,
+        group_order      = group_order,
+        palette          = palette,
+        show_annotations = show_annotations,
     )
 
 
@@ -437,6 +529,9 @@ def plot_log2fc_bar(
     gene_col: str,
     stats_df: pd.DataFrame | None = None,
     title: str = "log₂ Fold Change (−ΔΔCt)  —  mean ± SD, biological replicates",
+    group_order: list | None = None,
+    palette: str = "Default",
+    show_annotations: bool = True,
 ) -> go.Figure:
     """
     Bar + dot plot of log₂ Fold Change.
@@ -445,26 +540,32 @@ def plot_log2fc_bar(
 
     Parameters
     ----------
-    summary_df : Required columns: Gene, Group, Mean_log2FC, SD_log2FC
-    detail_df  : Required column: log2FC (plus group_col, gene_col)
-    group_col  : group column name in detail_df
-    gene_col   : gene column name in detail_df
-    stats_df   : optional statistics table
-    title      : figure title
+    summary_df       : Required columns: Gene, Group, Mean_log2FC, SD_log2FC
+    detail_df        : Required column: log2FC (plus group_col, gene_col)
+    group_col        : group column name in detail_df
+    gene_col         : gene column name in detail_df
+    stats_df         : optional statistics table
+    title            : figure title
+    group_order      : explicit group display order (list of group name strings)
+    palette          : color palette name — one of PALETTES keys
+    show_annotations : whether to draw significance stars
     """
     return _bar_dot_plot(
-        summary_df   = summary_df,
-        detail_df    = detail_df,
-        group_col    = group_col,
-        gene_col     = gene_col,
-        y_mean       = "Mean_log2FC",
-        y_sd         = "SD_log2FC",
-        y_detail     = "log2FC",
-        y_axis_title = "log₂ Fold Change (mean ± SD)",
-        ref_line     = 0.0,
-        ref_label    = "log₂FC = 0",
-        title        = title,
-        stats_df     = stats_df,
+        summary_df       = summary_df,
+        detail_df        = detail_df,
+        group_col        = group_col,
+        gene_col         = gene_col,
+        y_mean           = "Mean_log2FC",
+        y_sd             = "SD_log2FC",
+        y_detail         = "log2FC",
+        y_axis_title     = "log₂ Fold Change (mean ± SD)",
+        ref_line         = 0.0,
+        ref_label        = "log₂FC = 0",
+        title            = title,
+        stats_df         = stats_df,
+        group_order      = group_order,
+        palette          = palette,
+        show_annotations = show_annotations,
     )
 
 

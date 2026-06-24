@@ -49,6 +49,7 @@ from visualization.qpcr_plots import (
     plot_log2fc_bar,
     plot_deltact_heatmap,
     plot_stats_results,
+    PALETTES,                  # palette name list for the color scheme selector
 )
 
 # =============================================================================
@@ -86,6 +87,40 @@ def _guess(candidates: list, columns: list) -> str | None:
             if c.lower() == col.lower():
                 return col
     return None
+
+
+# =============================================================================
+# SESSION STATE KEYS
+# =============================================================================
+# All analysis results are stored here so they survive widget-change reruns.
+# Plot-option keys are only initialised once (if absent); they are never
+# overwritten on subsequent reruns, which is what makes them persist.
+#
+# Keys used:
+#   qpcr_results         dict  — all DataFrames + scalar metadata from Run
+#   qpcr_col_*           str   — column mapping selections (sample/gene/ct/group)
+#   qpcr_ref_gene        str   — reference gene
+#   qpcr_control_group   str   — control group
+#   qpcr_stat_test       str   — statistical test
+#   qpcr_correction      str   — multiple-testing correction method
+#   qpcr_sel_groups      list  — selected groups for plotting
+#   qpcr_sel_genes       list  — selected genes for plotting
+#   qpcr_palette         str   — colour palette name
+#   qpcr_show_sig        bool  — show significance stars
+# =============================================================================
+
+# Initialise plot-option keys with safe sentinel values.
+# These are only set here if the key is completely absent from session_state,
+# so user selections are never overwritten by a rerun.
+for _key, _default in [
+    ("qpcr_palette",  "Default"),
+    ("qpcr_show_sig", True),
+]:
+    if _key not in st.session_state:
+        st.session_state[_key] = _default
+
+# qpcr_sel_groups and qpcr_sel_genes are initialised later (after we know
+# what groups/genes exist in the data), following the same pattern.
 
 
 # =============================================================================
@@ -167,6 +202,7 @@ with c1:
         "Sample column",
         cols,
         index=cols.index(_guess(["Sample", "sample_id", "SampleID", "ID"], cols) or cols[0]),
+        key="qpcr_col_sample",
         help=(
             "Biological sample identifier (e.g. WT_R1). "
             "Multiple rows with the same Sample + Gene = technical replicates."
@@ -177,6 +213,7 @@ with c2:
         "Gene column",
         cols,
         index=cols.index(_guess(["Gene", "gene_name", "Target", "Assay"], cols) or cols[0]),
+        key="qpcr_col_gene",
         help="Gene names — include both target genes and the reference gene.",
     )
 with c3:
@@ -184,6 +221,7 @@ with c3:
         "Ct column",
         cols,
         index=cols.index(_guess(["Ct", "CT", "ct_value", "Cq", "Cp"], cols) or cols[0]),
+        key="qpcr_col_ct",
         help="Raw Ct / Cq values. Non-numeric values (e.g. 'Undetermined') will be excluded.",
     )
 with c4:
@@ -191,6 +229,7 @@ with c4:
         "Group / Treatment column",
         cols,
         index=cols.index(_guess(["Group", "Treatment", "Condition", "Genotype"], cols) or cols[0]),
+        key="qpcr_col_group",
         help="Experimental group (e.g. Control, Treatment).",
     )
 
@@ -251,6 +290,7 @@ with p_col:
             _guess(["GAPDH", "ACTB", "B2M", "HPRT1", "18S", "RPL13A"], available_genes)
             or available_genes[0]
         ) if _guess(["GAPDH", "ACTB", "B2M", "HPRT1", "18S", "RPL13A"], available_genes) else 0,
+        key="qpcr_ref_gene",
         help="Used to normalise all target genes. ΔCt = Ct(target) − Ct(this gene).",
     )
 
@@ -258,6 +298,7 @@ with c_col:
     control_group = st.selectbox(
         "Control group",
         available_groups,
+        key="qpcr_control_group",
         help="ΔΔCt = ΔCt(sample) − mean ΔCt of this group's biological replicates.",
     )
 
@@ -266,6 +307,7 @@ with s_col:
         "Statistical test",
         ["auto", "welch", "t-test", "wilcoxon", "anova", "kruskal"],
         index=0,
+        key="qpcr_stat_test",
         help=(
             "**auto**: Welch's t-test for 2 groups, one-way ANOVA for ≥3 groups. "
             "Tests are run on ΔCt biological replicate values (NOT on Fold Change)."
@@ -285,6 +327,7 @@ with corr_col:
         "Multiple testing correction",
         ["fdr_bh", "bonferroni", "none"],
         index=0,
+        key="qpcr_correction",
         help=(
             "Applied across all tested genes. "
             "**fdr_bh** = Benjamini-Hochberg (recommended); "
@@ -313,55 +356,107 @@ with st.expander("Genes that will be analysed"):
 st.divider()
 
 # =============================================================================
-# STEP 4 — Run
+# STEP 4 — Run the analysis
 # =============================================================================
 st.subheader("Step 4 — Run the analysis")
 
-if not st.button("▶ Run ΔΔCt Analysis", type="primary"):
+# The button stores results in session_state when clicked.
+# On subsequent reruns (e.g. when the user changes a plot option), the button
+# returns False but the stored results are still available — no st.stop() gate.
+run_clicked = st.button("▶ Run ΔΔCt Analysis", type="primary", key="qpcr_run_btn")
+
+if run_clicked:
+    with st.spinner("Running analysis…"):
+        try:
+            # ── 1. Average technical replicates ───────────────────────────────
+            avg_df = average_technical_replicates(
+                raw_df, sample_col, gene_col, ct_col, group_col
+            )
+            # ── 2. ΔCt at biological-sample level ─────────────────────────────
+            delta_ct_df = calculate_delta_ct(
+                avg_df, sample_col, gene_col, ct_col, reference_gene
+            )
+            # ── 3. ΔΔCt + Fold Change ─────────────────────────────────────────
+            detail_df = calculate_delta_delta_ct(
+                delta_ct_df, group_col, control_group
+            )
+            # ── 4. Biological-replicate summary (mean ± SD) ───────────────────
+            summary_df = summarise_results(detail_df, group_col)
+            # ── 5. Statistics on ΔCt biological replicates ────────────────────
+            stats_df = run_statistical_tests(
+                delta_ct_df, group_col,
+                test=stat_test,
+                correction_method=correction,
+            )
+
+            # ── Store everything in session_state ─────────────────────────────
+            # Also store the column names used, so the results section can
+            # reference them correctly even after a widget-change rerun.
+            st.session_state["qpcr_results"] = {
+                "avg_df":       avg_df,
+                "delta_ct_df":  delta_ct_df,
+                "detail_df":    detail_df,
+                "summary_df":   summary_df,
+                "stats_df":     stats_df,
+                "sample_col":   sample_col,
+                "gene_col":     gene_col,
+                "ct_col":       ct_col,
+                "group_col":    group_col,
+                "reference_gene":  reference_gene,
+                "control_group":   control_group,
+                "stat_test":    stat_test,
+                "correction":   correction,
+                "n_raw_rows":   len(raw_df),
+                "avg_tech_n":   avg_df["Ct_Tech_N"].mean() if "Ct_Tech_N" in avg_df.columns else "?",
+            }
+
+            # Reset plot-option selections to "all" when a new analysis is run,
+            # so the user isn't left with stale gene/group filters from a
+            # previous dataset.
+            st.session_state["qpcr_sel_groups"] = detail_df[group_col].unique().tolist()
+            st.session_state["qpcr_sel_genes"]  = sorted(detail_df[gene_col].unique().tolist())
+
+        except ValueError as e:
+            _stop(f"❌ Analysis error: {e}")
+        except Exception as e:
+            _stop(
+                f"❌ Unexpected error: {e}\n\n"
+                "Check your column selections and data format."
+            )
+
+# ── Gate: require results before showing anything below ───────────────────────
+# This replaces the old st.stop() pattern.  If results are not yet in
+# session_state (i.e. Run has never been clicked), stop here gracefully.
+if "qpcr_results" not in st.session_state:
     st.info("Configure the settings above, then click **▶ Run ΔΔCt Analysis**.", icon="ℹ️")
     st.stop()
 
-with st.spinner("Running analysis…"):
-    try:
-        # ── 1. Average technical replicates ───────────────────────────────────
-        avg_df = average_technical_replicates(
-            raw_df, sample_col, gene_col, ct_col, group_col
-        )
+# ── Unpack stored results ─────────────────────────────────────────────────────
+# From this point on, all variables come from session_state, not from the
+# button callback.  This means they are available on every rerun, including
+# reruns triggered by plot-option widget changes.
+_r = st.session_state["qpcr_results"]
 
-        # ── 2. ΔCt at biological-sample level ────────────────────────────────
-        delta_ct_df = calculate_delta_ct(
-            avg_df, sample_col, gene_col, ct_col, reference_gene
-        )
-
-        # ── 3. ΔΔCt + Fold Change ────────────────────────────────────────────
-        detail_df = calculate_delta_delta_ct(
-            delta_ct_df, group_col, control_group
-        )
-
-        # ── 4. Biological-replicate summary (mean ± SD) ───────────────────────
-        summary_df = summarise_results(detail_df, group_col)
-
-        # ── 5. Statistics on ΔCt biological replicates ───────────────────────
-        stats_df = run_statistical_tests(
-            delta_ct_df, group_col,
-            test=stat_test,
-            correction_method=correction,
-        )
-
-    except ValueError as e:
-        _stop(f"❌ Analysis error: {e}")
-    except Exception as e:
-        _stop(
-            f"❌ Unexpected error: {e}\n\n"
-            "Check your column selections and data format."
-        )
+avg_df         = _r["avg_df"]
+delta_ct_df    = _r["delta_ct_df"]
+detail_df      = _r["detail_df"]
+summary_df     = _r["summary_df"]
+stats_df       = _r["stats_df"]
+sample_col     = _r["sample_col"]
+gene_col       = _r["gene_col"]
+ct_col         = _r["ct_col"]
+group_col      = _r["group_col"]
+reference_gene = _r["reference_gene"]
+control_group  = _r["control_group"]
+stat_test      = _r["stat_test"]
+correction     = _r["correction"]
+n_raw_rows     = _r["n_raw_rows"]
+avg_tech_n     = _r["avg_tech_n"]
 
 st.success("✅ Analysis complete!", icon="✅")
 
 # Quick averaging summary
-n_raw_rows   = len(raw_df)
-n_avg_rows   = len(avg_df)
-avg_tech_n   = avg_df["Ct_Tech_N"].mean() if "Ct_Tech_N" in avg_df.columns else "?"
+n_avg_rows = len(avg_df)
 st.info(
     f"ℹ️ **Technical replicate averaging:** {n_raw_rows} raw rows → "
     f"{n_avg_rows} biological sample × gene entries "
@@ -372,50 +467,186 @@ st.info(
 st.divider()
 
 # =============================================================================
-# GROUP SELECTION  –  filter which groups appear in plots and summary tables
+# STEP 5 — Plot options
 # =============================================================================
-st.subheader("Step 5 — Select groups to display")
+# ALL widgets here use:
+#   key=        — a stable string so Streamlit tracks widget identity across reruns
+#   session_state initialisation pattern — default is set ONCE (on first run after
+#                 analysis), then preserved on all subsequent reruns automatically.
+#
+# The pattern for each multiselect/selectbox/checkbox is:
+#   1. Ensure the session_state key exists (set default if absent)
+#   2. Render the widget with key=  (Streamlit writes user changes back to
+#      session_state[key] automatically — no on_change callback needed)
+#   3. Read the current value from st.session_state[key] for use below
+# =============================================================================
+st.subheader("Step 5 — Plot options")
+st.divider()
 
 all_result_groups = detail_df[group_col].unique().tolist()
+all_result_genes  = sorted(detail_df[gene_col].unique().tolist())
 
-selected_groups = st.multiselect(
-    "Groups to include in plots and summary tables",
+# Initialise group/gene selections to "all" only if not already in session_state.
+# (They are set to "all" when Run is clicked; here we only set them if somehow
+# missing, e.g. on a page refresh after the state was cleared.)
+if "qpcr_sel_groups" not in st.session_state:
+    st.session_state["qpcr_sel_groups"] = all_result_groups
+if "qpcr_sel_genes" not in st.session_state:
+    st.session_state["qpcr_sel_genes"]  = all_result_genes
+
+# ── A/B  Group selection & order ─────────────────────────────────────────────
+st.markdown("**Group display & order**")
+st.caption(
+    "Select which groups appear in plots. "
+    "The order you select them defines the left-to-right bar order and legend order."
+)
+
+# Sanitise: remove any stale group names that no longer exist in the current results
+_valid_sel_groups = [g for g in st.session_state["qpcr_sel_groups"] if g in all_result_groups]
+if not _valid_sel_groups:
+    _valid_sel_groups = all_result_groups
+st.session_state["qpcr_sel_groups"] = _valid_sel_groups
+
+st.multiselect(
+    "Groups to include (select in desired display order)",
     options=all_result_groups,
-    default=all_result_groups,
+    default=st.session_state["qpcr_sel_groups"],
+    key="qpcr_sel_groups",
     help=(
-        "Choose which experimental groups appear in the bar charts and "
-        "per-replicate dot overlay. All groups are always included in the "
-        "raw data tables (tabs 2 and 3). "
-        "Select at least 1 group to generate plots."
+        "Select groups in the order you want them to appear in plots. "
+        "The first group selected appears leftmost / first in the legend. "
+        "Download tables always contain all groups."
     ),
 )
 
+selected_groups = st.session_state["qpcr_sel_groups"]
+
 if len(selected_groups) == 0:
-    st.warning(
-        "⚠️ No groups selected. Please select at least one group to display plots.",
-        icon="⚠️",
-    )
+    st.warning("⚠️ No groups selected. Select at least one group to display plots.", icon="⚠️")
     st.stop()
+
+group_order = selected_groups   # selection order = display order
 
 if len(selected_groups) < len(all_result_groups):
     st.info(
-        f"ℹ️ Showing {len(selected_groups)} of {len(all_result_groups)} groups: "
-        f"{', '.join(selected_groups)}.",
+        f"ℹ️ Showing {len(selected_groups)} of {len(all_result_groups)} groups in "
+        f"this order: {' → '.join(selected_groups)}.",
         icon="ℹ️",
     )
 
-# Filter all result DataFrames to selected groups
-plot_summary_df = summary_df[summary_df["Group"].isin(selected_groups)].copy()
-plot_detail_df  = detail_df[detail_df[group_col].isin(selected_groups)].copy()
-plot_stats_df   = (
+st.divider()
+
+# ── C / D / E  Gene selection, palette, significance ─────────────────────────
+opt_col1, opt_col2, opt_col3 = st.columns([2, 1, 1])
+
+with opt_col1:
+    st.markdown("**Genes to display in plots**")
+
+    # Sanitise: remove stale gene names
+    _valid_sel_genes = [g for g in st.session_state["qpcr_sel_genes"] if g in all_result_genes]
+    if not _valid_sel_genes:
+        _valid_sel_genes = all_result_genes
+    st.session_state["qpcr_sel_genes"] = _valid_sel_genes
+
+    st.multiselect(
+        "Target genes shown in plots",
+        options=all_result_genes,
+        default=st.session_state["qpcr_sel_genes"],
+        key="qpcr_sel_genes",
+        help=(
+            "Choose which target genes appear in the bar charts and heatmap. "
+            "Genes excluded here are still included in all download tables."
+        ),
+    )
+    selected_genes = st.session_state["qpcr_sel_genes"]
+
+    if len(selected_genes) == 0:
+        st.warning("⚠️ No genes selected. Select at least one gene to display plots.")
+        st.stop()
+
+with opt_col2:
+    st.markdown("**Color palette**")
+    st.selectbox(
+        "Color scheme",
+        options=list(PALETTES.keys()),
+        index=list(PALETTES.keys()).index(
+            st.session_state.get("qpcr_palette", "Default")
+        ),
+        key="qpcr_palette",
+        help=(
+            "**Default** — teal/coral scheme.\n"
+            "**Nature-style** — colors from Nature journal figures.\n"
+            "**Colorblind-friendly** — Wong (2011) palette, safe for 8% of readers.\n"
+            "**Pastel** — soft muted tones.\n"
+            "**High contrast** — maximum separation for presentations.\n"
+            "**Viridis** — perceptually uniform sequential palette."
+        ),
+    )
+    palette_name = st.session_state["qpcr_palette"]
+
+with opt_col3:
+    st.markdown("**Significance annotations**")
+    st.checkbox(
+        "Show significance stars",
+        value=st.session_state.get("qpcr_show_sig", True),
+        key="qpcr_show_sig",
+        help=(
+            "Display significance stars above bar pairs when statistical tests "
+            "are available. Stars: **** p<0.0001, *** p<0.001, ** p<0.01, "
+            "* p<0.05. Only shown for 2-group comparisons."
+        ),
+    )
+    show_sig = st.session_state["qpcr_show_sig"]
+
+# ── Build plot-filtered DataFrames ────────────────────────────────────────────
+# Plots use selected groups (in user-defined order) AND selected genes.
+# Download tables always use the full unfiltered DataFrames.
+plot_summary_df = (
+    summary_df[
+        summary_df["Group"].isin(selected_groups) &
+        summary_df["Gene"].isin(selected_genes)
+    ]
+    .copy()
+)
+# Re-impose user-defined group order
+plot_summary_df["_group_order"] = plot_summary_df["Group"].map(
+    {g: i for i, g in enumerate(group_order)}
+)
+plot_summary_df = plot_summary_df.sort_values("_group_order").drop(columns=["_group_order"])
+
+plot_detail_df = (
+    detail_df[
+        detail_df[group_col].isin(selected_groups) &
+        detail_df[gene_col].isin(selected_genes)
+    ]
+    .copy()
+)
+
+plot_stats_df = (
     stats_df[
         stats_df["Groups_Compared"].apply(
             lambda s: any(g in str(s) for g in selected_groups)
-        )
+        ) &
+        stats_df["Gene"].isin(selected_genes)
     ].copy()
-    if stats_df is not None and not stats_df.empty and "Groups_Compared" in stats_df.columns
+    if (
+        stats_df is not None
+        and not stats_df.empty
+        and "Groups_Compared" in stats_df.columns
+        and "Gene" in stats_df.columns
+    )
     else stats_df
 )
+
+# ── Optional debug expander ───────────────────────────────────────────────────
+with st.expander("🛠 Debug — session state (optional)", expanded=False):
+    qpcr_keys = {k: v for k, v in st.session_state.items() if k.startswith("qpcr_")}
+    # Show scalar keys only (DataFrames are too large to display usefully)
+    scalar_keys = {
+        k: (str(v)[:120] if not isinstance(v, dict) else "{dict with keys: " + ", ".join(v.keys()) + "}")
+        for k, v in qpcr_keys.items()
+    }
+    st.json(scalar_keys)
 
 st.divider()
 
@@ -530,7 +761,10 @@ with tab_fc:
         fig_fc = plot_fold_change_bar(
             plot_summary_df, plot_detail_df,
             group_col, gene_col,
-            stats_df=plot_stats_df,
+            stats_df         = plot_stats_df,
+            group_order      = group_order,
+            palette          = palette_name,
+            show_annotations = show_sig,
         )
         st.plotly_chart(fig_fc, use_container_width=True)
 
@@ -561,7 +795,10 @@ with tab_log2:
         fig_log2 = plot_log2fc_bar(
             plot_summary_df, plot_detail_df,
             group_col, gene_col,
-            stats_df=plot_stats_df,
+            stats_df         = plot_stats_df,
+            group_order      = group_order,
+            palette          = palette_name,
+            show_annotations = show_sig,
         )
         st.plotly_chart(fig_log2, use_container_width=True)
 
@@ -588,8 +825,11 @@ with tab_heatmap:
         "Blue = lower ΔCt (higher relative expression); Red = higher ΔCt."
     )
     try:
-        # Filter heatmap to selected groups via the detail_df
-        heatmap_df = delta_ct_df[delta_ct_df[group_col].isin(selected_groups)]
+        # Filter heatmap to selected groups AND selected genes
+        heatmap_df = delta_ct_df[
+            delta_ct_df[group_col].isin(selected_groups) &
+            delta_ct_df[gene_col].isin(selected_genes)
+        ]
         fig_heat = plot_deltact_heatmap(heatmap_df, sample_col, gene_col)
         st.plotly_chart(fig_heat, use_container_width=True)
 
@@ -614,7 +854,7 @@ with tab_heatmap:
 
 # ── Tab 7: Statistics ─────────────────────────────────────────────────────────
 with tab_stats:
-    n_groups = len(available_groups)
+    n_groups = len(all_result_groups)
     test_name_map = {
         "auto":     "Welch's t-test (auto)" if n_groups == 2 else "One-way ANOVA (auto)",
         "welch":    "Welch's t-test",
